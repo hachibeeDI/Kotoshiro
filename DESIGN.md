@@ -96,7 +96,7 @@ transcript JSONL の行形式は公式に「内部仕様、バージョンで変
 ```
 .counter                  # 連番 ID の次値。ロック下で読み書き
 <id>/
-  .lock                   # TODO ディレクトリ単位の排他 (fs4)。2 TODO を触る時は ID 昇順に取る
+  .lock                   # TODO ディレクトリ単位の排他 (std の File::lock)。2 TODO を触る時は ID 昇順に取る
   todo.md                 # YAML frontmatter + 本文 + "## Checklist"
   journal.md              # 追記専用。"## <RFC3339> session=<sid 先頭 8> kind=<note|check|start|end|status>" + 本文。contract セクションにリポ間の契約
   digest.md               # frontmatter: updated_at, journal_bytes, log_bytes。本文: 一行 + いま/次/詰まり。手で編集しない
@@ -175,7 +175,7 @@ kotoshiro done <id>         # 条件: status done 相当 + 全 PR merged
 - 外部入力の検証は 2 段。kotoshiro が形を指定して要求する JSON (`gh --json <fields>`、herdr `--json`) は `serde` + `deny_unknown_fields` で厳格に。Claude Code 由来の payload (hook stdin、`claude -p` の出力) はバージョン毎にフィールドが増えるため、必要フィールドだけ取り未知は無視する
 - 要約器の子プロセスは `claude -p --model haiku --setting-sources "" --strict-mcp-config --no-session-persistence` で起動する。`--bare` は OAuth を読まない仕様 (API キー専用) なので使えない。hook の再帰は env `KOTOSHIRO_NESTED=1` で止める: hook コマンドはこれを見たら即終了する。`--setting-sources ""` で設定 (hook 含む) を読まないので二重の防御になる
 - CLI は `clap`。全サブコマンドに `--json` を持たせ、skill / driver セッションから機械読みできるようにする
-- ストアは plain text。DB は入れない。並行書き込みは TODO ディレクトリ単位のファイルロック (`fs4`)
+- ストアは plain text。DB は入れない。並行書き込みは TODO ディレクトリ単位のファイルロック (Rust 1.89 で安定化した `std::fs::File::lock`。外部 crate 不要)
 - 要約器は `Summarizer` port。既定実装は `claude -p --model haiku --output-format json` を子プロセスで叩く。ユーザーの Claude ログインを流用するので API キーも SDK も不要。`KOTOSHIRO_SUMMARIZER=fixed` で固定文字列を返す実装に差し替える (テスト用)
 - 子プロセス (`git` / `gh` / `herdr` / `claude`) の起動は 1 モジュールに集め、テストで差し替え可能にする
 - 配布: `cargo-dist` で GitHub Releases + brew tap。クロスビルド対象は macOS (arm64 / x86_64) と Linux (x86_64 / arm64)
