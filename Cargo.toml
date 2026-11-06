@@ -5,7 +5,7 @@ edition = "2021"
 rust-version = "1.89"
 description = "TODO を根に据えて Claude Code セッション群を司るツール"
 license = "MIT"
-repository = "https://github.com/hachibeeDI/kotoshiro"
+repository = "https://github.com/hachibeeDI/Kotoshiro"
 
 [dependencies]
 anyhow = "1"
