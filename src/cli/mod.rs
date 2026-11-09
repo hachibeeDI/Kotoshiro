@@ -1,14 +1,18 @@
 pub mod check;
 pub mod digest;
+pub mod done;
 pub mod hook;
 pub mod init;
+pub mod issue;
 pub mod link;
 pub mod list;
 pub mod new;
 pub mod note;
+pub mod plan;
 pub mod show;
 pub mod start;
 pub mod status;
+pub mod tree;
 
 use std::collections::HashMap;
 

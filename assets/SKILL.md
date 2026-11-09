@@ -16,6 +16,20 @@ kotoshiro show --json
 
 title / status / checklist / 直近の journal / digest が返る。作業開始時と、何をすべきか迷った時に読む。
 
+## 計画が固まったら plan を流す
+
+```
+kotoshiro plan - <<'EOF'
+- 失敗時に指数バックオフ
+- 上限回数を設定で持つ
+- テスト
+EOF
+```
+
+行頭の箇条書き (`- ` / `* ` / `1. `) が checklist になる。入れ子の行は無視される。
+やり直す時は `--replace` (消化済みは残る)。journal にも自動で記録されるので note は不要。
+大きな作業を分割する時は `--children` で子 TODO にする。
+
 ## 区切りごとに note を打つ
 
 ```
@@ -24,10 +38,9 @@ kotoshiro note "<1〜3 行の要点>"
 
 打つタイミング (いずれも必須):
 
-1. 計画が固まった時 (何をどの順でやるか)
-2. checklist の 1 項目が終わった時
-3. 詰まった時 (何を試して何が分からないか)
-4. ユーザーに返答を返す直前 (この時点の状態と次の一手)
+1. checklist の 1 項目が終わった時
+2. 詰まった時 (何を試して何が分からないか)
+3. ユーザーに返答を返す直前 (この時点の状態と次の一手)
 
 内容は後で自分または別セッションが読んで作業を再開できる密度で書く。ユーザー向けの体裁は不要。
 
@@ -50,5 +63,5 @@ kotoshiro new "<title>" --blocks $KOTOSHIRO_TODO
 
 ## やらないこと
 
-- `kotoshiro status <id> done` は打たない。完了判断は人がする
+- `kotoshiro status <id> done` と `kotoshiro done` は打たない。完了判断は人がする
 - journal.md / digest.md / sessions.json を直接編集しない。必ず CLI 経由

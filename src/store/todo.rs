@@ -32,6 +32,20 @@ pub struct Repo {
     pub base_branch: String,
 }
 
+impl Repo {
+    /// `<repo>/../<repo名>-wt/todo-<id>`
+    pub fn worktree_dir(&self, id: u64) -> PathBuf {
+        let parent = self.path.parent().unwrap_or(&self.path);
+        parent
+            .join(format!("{}-wt", self.name))
+            .join(format!("todo-{id}"))
+    }
+
+    pub fn branch(&self, id: u64) -> String {
+        format!("todo/{id}")
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Pr {
     pub repo: String,
@@ -159,8 +173,21 @@ impl Todo {
         bail!("checklist has {seen} items, no item {n}")
     }
 
-    /// 本文末尾 (`## Checklist` 配下) に項目を足す。`plan` (週 2) が使う。
-    #[allow(dead_code)]
+    /// 未消化の checklist 行を消す (`plan --replace`)。消化済みは残す。
+    pub fn remove_unchecked(&mut self) -> usize {
+        let before = self.body.lines().count();
+        let trailing = if self.body.ends_with('\n') { "\n" } else { "" };
+        let kept: Vec<&str> = self
+            .body
+            .lines()
+            .filter(|l| !matches!(parse_item(l), Some(Item { done: false, .. })))
+            .collect();
+        let removed = before - kept.len();
+        self.body = kept.join("\n") + trailing;
+        removed
+    }
+
+    /// 本文末尾 (`## Checklist` 配下) に項目を足す。
     pub fn push_item(&mut self, text: &str) {
         if !self.body.contains(CHECKLIST_HEADING) {
             if !self.body.ends_with('\n') {
@@ -172,11 +199,6 @@ impl Todo {
             self.body.push('\n');
         }
         self.body.push_str(&format!("- [ ] {text}\n"));
-    }
-
-    #[allow(dead_code)]
-    pub fn checklist_complete(&self) -> bool {
-        self.checklist().iter().all(|i| i.done)
     }
 
     pub fn touch(&mut self, now: Timestamp) {
@@ -229,11 +251,33 @@ mod tests {
         let items = t.checklist();
         assert!(!items[0].done);
         assert!(items[1].done);
-        assert!(!t.checklist_complete());
         t.set_checked(1, true).unwrap();
-        assert!(t.checklist_complete());
+        assert!(t.checklist().iter().all(|i| i.done));
         assert!(t.set_checked(3, true).is_err());
         assert!(t.set_checked(0, true).is_err());
+    }
+
+    #[test]
+    fn remove_unchecked_keeps_done() {
+        let mut t = sample();
+        t.set_checked(1, true).unwrap();
+        assert_eq!(t.remove_unchecked(), 1);
+        let items = t.checklist();
+        assert_eq!(items.len(), 1);
+        assert!(items[0].done);
+        t.push_item("three");
+        assert_eq!(t.checklist().len(), 2);
+    }
+
+    #[test]
+    fn worktree_dir_rule() {
+        let r = Repo {
+            name: "app".into(),
+            path: PathBuf::from("/src/app"),
+            base_branch: "main".into(),
+        };
+        assert_eq!(r.worktree_dir(42), PathBuf::from("/src/app-wt/todo-42"));
+        assert_eq!(r.branch(42), "todo/42");
     }
 
     #[test]

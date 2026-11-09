@@ -1,5 +1,6 @@
 use jiff::Timestamp;
 
+use crate::runtime::SessionState;
 use crate::store::digest::Digest;
 use crate::store::journal::Entry;
 use crate::store::sessions::Session;
@@ -64,13 +65,19 @@ pub fn list(rows: &[Row], now: Timestamp) -> String {
     out
 }
 
+pub struct SessionRow<'a> {
+    pub session: &'a Session,
+    /// adapter が答えられた時だけ (herdr の live pane)
+    pub state: Option<SessionState>,
+}
+
 pub struct ShowView<'a> {
     pub todo: &'a Todo,
     pub blocked: bool,
     pub digest: Option<&'a Digest>,
     pub stale: bool,
     pub checklist: &'a [Item],
-    pub sessions: &'a [Session],
+    pub sessions: &'a [SessionRow<'a>],
     pub journal: &'a [Entry],
     pub now: Timestamp,
 }
@@ -106,6 +113,14 @@ pub fn show(v: &ShowView) -> String {
     if !m.blocked_by.is_empty() {
         o.push_str(&format!("blocked_by: {}\n", ids(&m.blocked_by)));
     }
+    if !m.prs.is_empty() {
+        let ps: Vec<String> = m
+            .prs
+            .iter()
+            .map(|p| format!("{}#{} {}", p.repo, p.number, p.state))
+            .collect();
+        o.push_str(&format!("prs: {}\n", ps.join(", ")));
+    }
 
     o.push('\n');
     match v.digest {
@@ -138,9 +153,10 @@ pub fn show(v: &ShowView) -> String {
 
     if !v.sessions.is_empty() {
         o.push_str("\n## sessions\n");
-        for s in v.sessions {
+        for r in v.sessions {
+            let s = r.session;
             o.push_str(&format!(
-                "{} {} {}{}{}\n",
+                "{} {} {}{}{}{}{}\n",
                 if s.is_live() { "*" } else { " " },
                 &s.session_id[..s.session_id.len().min(8)],
                 local(s.started_at),
@@ -148,6 +164,12 @@ pub fn show(v: &ShowView) -> String {
                     .as_deref()
                     .map(|r| format!(" repo={r}"))
                     .unwrap_or_default(),
+                if s.runtime.reference.is_empty() {
+                    String::new()
+                } else {
+                    format!(" {}={}", s.runtime.runtime, s.runtime.reference)
+                },
+                r.state.map(|st| format!(" [{st}]")).unwrap_or_default(),
                 s.ended_at
                     .map(|e| format!(" ended {}", local(e)))
                     .unwrap_or_default()

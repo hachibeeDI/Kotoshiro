@@ -9,9 +9,11 @@ use serde::Serialize;
 pub enum Kind {
     Note,
     Check,
+    Plan,
     Start,
     End,
     Status,
+    Done,
 }
 
 impl Kind {
@@ -19,9 +21,11 @@ impl Kind {
         match self {
             Kind::Note => "note",
             Kind::Check => "check",
+            Kind::Plan => "plan",
             Kind::Start => "start",
             Kind::End => "end",
             Kind::Status => "status",
+            Kind::Done => "done",
         }
     }
 }

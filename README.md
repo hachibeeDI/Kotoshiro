@@ -73,19 +73,38 @@ repos が空の TODO はカレントディレクトリで起動する。`--json`
 
 `--print` で表示したコマンドを結局打たなかった場合、`sessions.json` に終わらないセッションが残る (S 列に出続ける)。見るだけなら `--dry-run` を使う。
 
-herdr や tmux で pane を開き、そこで `todo start <id>` を打つのが想定運用。日が空いた TODO に戻る時も同じ。セッションを resume するのではなく、journal を読んだ新しいセッションを立てる。
+日が空いた TODO に戻る時も `start` を打つ。セッションを resume するのではなく、journal を読んだ新しいセッションを立てる。
+
+#### herdr で起動する
+
+```sh
+export KOTOSHIRO_RUNTIME=herdr      # または todo start 1 --runtime herdr
+todo start 1                        # 新しい workspace を作り、その pane で claude を起動
+todo start 1 --repo lib --no-focus  # 同じ workspace に tab を足す。フォーカスは移さない
+```
+
+対応は TODO = workspace (label `#1 タイトル`)、repo = tab、セッション = pane 内の agent。workspace には `KOTOSHIRO_TODO` が env として付くので、その中で手で開いた pane から起動した claude も hook が拾う。
+workspace は label で毎回探すので herdr を再起動しても壊れない。`todo show` の sessions に pane id と agent の状態 (`[working]` / `[blocked]` / `[idle]`) が出る。
+
+herdr 以外では、pane を開いてそこで `todo start <id>` を打つ (manual)。
 
 ### 3. セッション内で起きること
 
 セッションには skill `kotoshiro` が入っている。Claude は次を自分で打つ:
 
 ```sh
-kotoshiro note "計画: バックオフ → 上限 → テストの順。設定は config.toml に足す"
+kotoshiro plan - <<'EOF'            # 計画が固まったら箇条書きを流す → checklist になる
+- 失敗時に指数バックオフ
+- 上限回数を設定で持つ
+- テスト
+EOF
+kotoshiro note "バックオフ実装、テスト通過。設定は config.toml に足す"
 kotoshiro check 1
 kotoshiro new "lib 側の timeout が固定値" --blocks $KOTOSHIRO_TODO   # スコープ外の障害
 ```
 
-`note` は区切りごと (計画確定、checklist 1 項目完了、詰まった、ユーザーに返す前)。`--blocks` で作った TODO が未完了の間、元の TODO は blocked と表示される。
+`plan` は行頭の箇条書き (`- ` / `* ` / `1. `) を拾い、inbox なら planning に進める。`--children` で子 TODO として起票、`--replace` で未消化分を置き換える。
+`note` は区切りごと (checklist 1 項目完了、詰まった、ユーザーに返す前)。`--blocks` で作った TODO が未完了の間、元の TODO は blocked と表示される。
 
 hook は自動で動く:
 
@@ -138,15 +157,32 @@ repos: app (/Users/me/src/app, base main)
 
 digest が stale なら `todo digest 1` で再生成する。生成に失敗しても前回の digest は残り、警告だけ出る。
 
+Epic (`--parent`) で分けた TODO は `todo tree` で木として見る。
+
+```
+$ todo tree
+#1 planning    認証まわり刷新  ~設計確定。#2 から着手
+├─ #2 active     トークン更新  リフレッシュ実装中
+└─ #3 inbox    B 監査ログ
+```
+
 ### 5. 終わらせる
 
 ```sh
-todo status 1 done
+todo done 1 --dry-run   # 条件判定と PR 収集だけ
+todo done 1
 ```
 
-checklist が全部消えていて、blocked_by が全部 done でないと拒否される (`--force` で無視)。完了判断は人がする。セッションは `status done` を打たない。
+`done` がやること:
 
-issue へのコメント投稿、PR の merged 確認、worktree の片付けは未実装 (`todo done` として予定)。
+1. 条件判定: checklist 全消化、blocked_by 全 done、動作中セッションなし、repo ごとに merged PR があり open PR がない (`gh pr list --head todo/<id>` で引く)。違反があれば止まる。`--force` で警告に落とす
+2. issue があれば journal から haiku で完了コメントを生成して表示し、確認のうえ `gh issue comment` を 1 回打つ。`--yes` で確認省略、`--no-comment` で投稿しない
+3. worktree を外してブランチを消す (`--keep-worktree` で残す)。herdr なら workspace を閉じる
+4. status を done にし、PR 一覧を `prs` に記録する
+
+issue を閉じるのは人がやる。issue が無い TODO は `todo issue create <id>` で起こして link できる (repo は TODO の repos が 1 つならそれ、`--repo owner/repo` で指定)。
+
+`todo status 1 done` は片付けを伴わない完了 (条件は checklist と blocked_by のみ)。セッションは `status done` も `done` も打たない。完了判断は人がする。
 
 ## コマンド一覧
 
@@ -154,13 +190,17 @@ issue へのコメント投稿、PR の merged 確認、worktree の片付けは
 kotoshiro init [--no-link]
 kotoshiro new <title> [--issue org/repo#N] [--repo PATH]... [--blocks ID] [--parent ID] [--body TEXT|-]
 kotoshiro link <id> --issue org/repo#N
-kotoshiro start <id> [--repo NAME] [--print] [--dry-run]
+kotoshiro start <id> [--repo NAME] [--print] [--dry-run] [--runtime manual|herdr] [--no-focus]
+kotoshiro plan [TEXT|-] [--todo ID] [--children] [--replace]
 kotoshiro note [TEXT|-] [--todo ID]
 kotoshiro check <n> [--undo] [--todo ID]
 kotoshiro status <id> <inbox|planning|active|done> [--force]
+kotoshiro done <id> [--force] [--yes] [--no-comment] [--keep-worktree] [--dry-run]
+kotoshiro issue create <id> [--repo owner/repo] [--yes]
 kotoshiro digest <id> [--quiet]
 kotoshiro list [--all]
 kotoshiro show [id] [--journal N]
+kotoshiro tree [id] [--all]
 kotoshiro hook <stop|session-end>        # Claude Code から呼ばれる。stdin に JSON
 ```
 
@@ -173,7 +213,7 @@ kotoshiro hook <stop|session-end>        # Claude Code から呼ばれる。stdi
 | `KOTOSHIRO_HOME` | ストアの場所。既定 `~/todos` |
 | `KOTOSHIRO_TODO` | 現在の TODO ID。`start` が起動コマンドに付ける |
 | `KOTOSHIRO_SESSION` | 現在のセッション ID。journal の記録者 |
-| `KOTOSHIRO_RUNTIME` | セッション起動の adapter。現状 `manual` のみ |
+| `KOTOSHIRO_RUNTIME` | セッション起動の adapter。`manual` (既定) / `herdr` |
 | `KOTOSHIRO_SUMMARIZER` | `claude` (既定) / `fixed` / `fixed:<text>`。テスト用 |
 | `KOTOSHIRO_SUMMARIZER_MODEL` | 要約に使うモデル。既定 `haiku` |
 | `KOTOSHIRO_NESTED` | 要約器の子プロセスに付く。hook はこれを見たら即終了する |
@@ -191,11 +231,11 @@ kotoshiro hook <stop|session-end>        # Claude Code から呼ばれる。stdi
     journal.md            # 進捗の正本。セッションが note / check で書く
     log/<session>.md      # Stop hook の生ログ
     digest.md             # journal + log から生成。手で編集しない
-    sessions.json         # セッション記録
+    sessions.json         # セッション記録。herdr なら pane id も
     context.md            # start が生成する system prompt 追記分
 ```
 
-全部 plain text。`todo.md` の本文と checklist は手で編集してよい。
+全部 plain text。`todo.md` の本文と checklist は手で編集してよい。frontmatter の `prs` は `done` が書く。
 
 ## 開発
 
@@ -205,4 +245,4 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 ```
 
-統合テストは `KOTOSHIRO_SUMMARIZER=fixed` で haiku を呼ばずに動く。
+統合テストは `KOTOSHIRO_SUMMARIZER=fixed` で haiku を呼ばずに動く。herdr adapter は `tests/week2.rs` がフェイクの `herdr` スクリプトを PATH に置いて検証する。

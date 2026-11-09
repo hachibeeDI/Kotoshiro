@@ -8,6 +8,24 @@ fn git(repo: &Path) -> Cmd {
     Cmd::new("git").cwd(repo)
 }
 
+/// worktree を外す。`force` で未コミットの変更ごと消す。
+pub fn worktree_remove(repo: &Path, dir: &Path, force: bool) -> Result<()> {
+    let dir_s = dir.to_string_lossy().into_owned();
+    let mut a = vec!["worktree", "remove"];
+    if force {
+        a.push("--force");
+    }
+    a.push(&dir_s);
+    git(repo).args(a).ok()?;
+    Ok(())
+}
+
+/// ブランチを消す。`-d` なのでマージ済みでなければ失敗する。
+pub fn branch_delete(repo: &Path, branch: &str) -> Result<()> {
+    git(repo).args(["branch", "-d", branch]).ok()?;
+    Ok(())
+}
+
 pub fn toplevel(path: &Path) -> Result<PathBuf> {
     let out = git(path)
         .args(["rev-parse", "--show-toplevel"])

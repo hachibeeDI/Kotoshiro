@@ -16,6 +16,13 @@ pub fn parse_issue(s: &str) -> Result<String> {
     Ok(s.to_owned())
 }
 
+/// `org/repo#N` → (`org/repo`, N)
+pub fn split_issue(s: &str) -> Result<(String, u64)> {
+    let s = parse_issue(s)?;
+    let (repo, num) = s.split_once('#').expect("validated");
+    Ok((repo.to_owned(), num.parse().expect("validated")))
+}
+
 pub fn shell_quote(s: &str) -> String {
     if !s.is_empty()
         && s.chars()

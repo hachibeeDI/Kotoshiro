@@ -3,8 +3,9 @@ use clap::Args as ClapArgs;
 use serde::Serialize;
 
 use super::Ctx;
-use crate::render::{self, ShowView};
+use crate::render::{self, SessionRow, ShowView};
 use crate::resolve;
+use crate::runtime::{self, SessionState};
 use crate::store::digest::Digest;
 use crate::store::journal::{self, Entry};
 use crate::store::sessions::{self, Session};
@@ -20,6 +21,14 @@ pub struct Args {
 }
 
 #[derive(Serialize)]
+struct SessionOut<'a> {
+    #[serde(flatten)]
+    session: &'a Session,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    state: Option<SessionState>,
+}
+
+#[derive(Serialize)]
 struct Out<'a> {
     #[serde(flatten)]
     meta: &'a Meta,
@@ -28,7 +37,7 @@ struct Out<'a> {
     checklist: &'a [Item],
     digest: Option<&'a Digest>,
     digest_stale: bool,
-    sessions: &'a [Session],
+    sessions: Vec<SessionOut<'a>>,
     journal: &'a [Entry],
 }
 
@@ -45,6 +54,13 @@ pub fn run(ctx: &Ctx, a: Args) -> Result<()> {
     let mut sess = sessions::load(&ctx.store.sessions(id))?;
     sess.sort_by_key(|s| s.started_at);
     let recent: Vec<Session> = sess.into_iter().rev().take(5).collect();
+    let rows: Vec<SessionRow> = recent
+        .iter()
+        .map(|s| SessionRow {
+            state: live_state(s),
+            session: s,
+        })
+        .collect();
     let tail = journal::tail(&ctx.store.journal(id), a.journal)?;
 
     if ctx.json {
@@ -55,7 +71,13 @@ pub fn run(ctx: &Ctx, a: Args) -> Result<()> {
             checklist: &checklist,
             digest: digest.as_ref(),
             digest_stale: stale,
-            sessions: &recent,
+            sessions: rows
+                .iter()
+                .map(|r| SessionOut {
+                    session: r.session,
+                    state: r.state,
+                })
+                .collect(),
             journal: &tail,
         })
     } else {
@@ -67,11 +89,20 @@ pub fn run(ctx: &Ctx, a: Args) -> Result<()> {
                 digest: digest.as_ref(),
                 stale,
                 checklist: &checklist,
-                sessions: &recent,
+                sessions: &rows,
                 journal: &tail,
                 now: ctx.now,
             })
         );
         Ok(())
     }
+}
+
+/// live なセッションのうち adapter が状態を返せるもの (herdr の pane) だけ問い合わせる。
+fn live_state(s: &Session) -> Option<SessionState> {
+    if !s.is_live() || s.runtime.reference.is_empty() {
+        return None;
+    }
+    let rt = runtime::by_name(&s.runtime.runtime)?;
+    Some(rt.state(&s.runtime).unwrap_or(SessionState::Unknown))
 }

@@ -1,5 +1,6 @@
 mod agent;
 mod cli;
+mod gh;
 mod git;
 mod hook;
 mod proc;
@@ -34,14 +35,21 @@ enum Cmd {
     New(cli::new::Args),
     /// GitHub issue を後付けする
     Link(cli::link::Args),
-    /// worktree を用意してセッション起動コマンドを出す
+    /// worktree を用意してセッションを起動する
     Start(cli::start::Args),
     /// journal に進捗を書く
     Note(cli::note::Args),
+    /// 箇条書きを checklist (または子 TODO) に落とす
+    Plan(cli::plan::Args),
     /// checklist をトグルする
     Check(cli::check::Args),
     /// status を変える
     Status(cli::status::Args),
+    /// 完了処理: PR 確認、issue コメント、worktree / workspace 片付け
+    Done(cli::done::Args),
+    /// GitHub issue を扱う
+    #[command(subcommand)]
+    Issue(cli::issue::Cmd),
     /// Claude Code hook のエントリ (stdin に JSON)
     #[command(subcommand)]
     Hook(cli::hook::Event),
@@ -51,6 +59,8 @@ enum Cmd {
     List(cli::list::Args),
     /// TODO の詳細
     Show(cli::show::Args),
+    /// parent で組んだ木
+    Tree(cli::tree::Args),
 }
 
 fn main() {
@@ -68,12 +78,16 @@ fn main() {
             Cmd::Link(a) => cli::link::run(&ctx, a),
             Cmd::Start(a) => cli::start::run(&ctx, a),
             Cmd::Note(a) => cli::note::run(&ctx, a),
+            Cmd::Plan(a) => cli::plan::run(&ctx, a),
             Cmd::Check(a) => cli::check::run(&ctx, a),
             Cmd::Status(a) => cli::status::run(&ctx, a),
+            Cmd::Done(a) => cli::done::run(&ctx, a),
+            Cmd::Issue(c) => cli::issue::run(&ctx, c),
             Cmd::Hook(ev) => cli::hook::run(&ctx, ev),
             Cmd::Digest(a) => cli::digest::run(&ctx, a),
             Cmd::List(a) => cli::list::run(&ctx, a),
             Cmd::Show(a) => cli::show::run(&ctx, a),
+            Cmd::Tree(a) => cli::tree::run(&ctx, a),
         }
     });
     if let Err(e) = r {
