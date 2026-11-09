@@ -22,23 +22,33 @@ pub struct Args {
     /// repos が複数ある時に選ぶ (name)
     #[arg(long, value_name = "NAME")]
     pub repo: Option<String>,
-    /// 表示せず、このプロセスを claude に差し替える
+    /// claude を起動せず、記録だけして起動コマンドを表示する (--json も同じ扱い)
+    #[arg(long, conflicts_with = "dry_run")]
+    pub print: bool,
+    /// 何も書き込まず、何が起きるかだけ表示する
     #[arg(long)]
-    pub exec: bool,
+    pub dry_run: bool,
 }
 
 #[derive(Serialize)]
-struct Out {
+struct Plan {
     id: u64,
-    session_id: String,
+    dry_run: bool,
+    repo: Option<String>,
     cwd: PathBuf,
     worktree: Option<PathBuf>,
+    worktree_exists: bool,
+    context: PathBuf,
+    status_from: Status,
+    status_to: Status,
+    session_id: String,
     command: Option<String>,
 }
 
+const DRY_RUN_SESSION: &str = "<session-id>";
+
 pub fn run(ctx: &Ctx, a: Args) -> Result<()> {
     let launch;
-    let out;
     {
         let _g = lock::lock_todo(&ctx.store, a.id)?;
         let mut t = ctx.load(a.id)?;
@@ -47,31 +57,63 @@ pub fn run(ctx: &Ctx, a: Args) -> Result<()> {
         let (cwd, worktree) = match &repo {
             Some(r) => {
                 let dir = worktree_dir(r, a.id);
-                let created =
-                    git::worktree_add(&r.path, &dir, &format!("todo/{}", a.id), &r.base_branch)?;
-                if created && !ctx.json {
-                    eprintln!("worktree created: {}", dir.display());
-                }
                 (dir.clone(), Some(dir))
             }
             None => (std::env::current_dir()?, None),
         };
-
-        let session_id = uuid::Uuid::new_v4().to_string();
+        let worktree_exists = worktree.as_deref().is_some_and(|w| w.is_dir());
+        let session_id = if a.dry_run {
+            DRY_RUN_SESSION.to_owned()
+        } else {
+            uuid::Uuid::new_v4().to_string()
+        };
         let context_path = ctx.store.context(a.id);
-        std::fs::write(&context_path, context_md(ctx, &t)?)?;
-
         let name = agent::session_name(a.id, repo.as_ref().map(|r| r.name.as_str()));
         launch = agent::claude_launch(&cwd, a.id, &session_id, &name, &context_path);
         let rt = runtime::from_env()?;
         let spawned = rt.spawn(&launch)?;
+        let status_to = match t.meta.status {
+            Status::Inbox | Status::Planning => Status::Active,
+            s => s,
+        };
+        let plan = Plan {
+            id: a.id,
+            dry_run: a.dry_run,
+            repo: repo.as_ref().map(|r| r.name.clone()),
+            cwd: cwd.clone(),
+            worktree: worktree.clone(),
+            worktree_exists,
+            context: context_path.clone(),
+            status_from: t.meta.status,
+            status_to,
+            session_id: session_id.clone(),
+            command: spawned.shell_command.clone(),
+        };
+
+        if a.dry_run {
+            return if ctx.json {
+                ctx.print_json(&plan)
+            } else {
+                print!("{}", render_plan(&plan, &t, repo.as_ref()));
+                Ok(())
+            };
+        }
+
+        if let Some((r, dir)) = repo.as_ref().zip(worktree.as_ref()) {
+            let created =
+                git::worktree_add(&r.path, dir, &format!("todo/{}", a.id), &r.base_branch)?;
+            if created && !ctx.json {
+                eprintln!("worktree created: {}", dir.display());
+            }
+        }
+        std::fs::write(&context_path, context_md(ctx, &t)?)?;
 
         let spath = ctx.store.sessions(a.id);
         let mut list = sessions::load(&spath)?;
         list.push(Session {
             session_id: session_id.clone(),
             runtime: spawned.reference,
-            repo: repo.as_ref().map(|r| r.name.clone()),
+            repo: plan.repo.clone(),
             worktree: worktree.clone(),
             cwd: cwd.clone(),
             started_at: ctx.now,
@@ -80,9 +122,7 @@ pub fn run(ctx: &Ctx, a: Args) -> Result<()> {
         });
         sessions::save(&spath, &list)?;
 
-        if matches!(t.meta.status, Status::Inbox | Status::Planning) {
-            t.meta.status = Status::Active;
-        }
+        t.meta.status = status_to;
         t.touch(ctx.now);
         ctx.save(&t)?;
         journal::append(
@@ -93,8 +133,9 @@ pub fn run(ctx: &Ctx, a: Args) -> Result<()> {
             &format!(
                 "session started via {}{}{}",
                 rt.name(),
-                repo.as_ref()
-                    .map(|r| format!(" repo={}", r.name))
+                plan.repo
+                    .as_ref()
+                    .map(|r| format!(" repo={r}"))
                     .unwrap_or_default(),
                 worktree
                     .as_ref()
@@ -102,27 +143,51 @@ pub fn run(ctx: &Ctx, a: Args) -> Result<()> {
                     .unwrap_or_default()
             ),
         )?;
-        out = Out {
-            id: a.id,
-            session_id,
-            cwd,
-            worktree,
-            command: spawned.shell_command,
-        };
-    }
 
-    if a.exec {
-        return exec(&launch);
-    }
-    if ctx.json {
-        ctx.print_json(&out)
-    } else {
-        match &out.command {
-            Some(c) => println!("{c}"),
-            None => println!("session {} spawned", out.session_id),
+        if a.print || ctx.json {
+            return if ctx.json {
+                ctx.print_json(&plan)
+            } else {
+                match &plan.command {
+                    Some(c) => println!("{c}"),
+                    None => println!("session {} spawned", plan.session_id),
+                }
+                Ok(())
+            };
         }
-        Ok(())
     }
+    // ロックを手放してから exec する
+    exec(&launch)
+}
+
+fn render_plan(p: &Plan, t: &Todo, repo: Option<&Repo>) -> String {
+    let mut o = String::from("dry-run: nothing is written\n");
+    o.push_str(&format!("todo:      #{} {}\n", p.id, t.meta.title));
+    match repo {
+        Some(r) => o.push_str(&format!(
+            "repo:      {} ({}, base {})\n",
+            r.name,
+            r.path.display(),
+            r.base_branch
+        )),
+        None => o.push_str("repo:      (none; start in current directory)\n"),
+    }
+    if let Some(w) = &p.worktree {
+        o.push_str(&format!(
+            "worktree:  {} ({})\n",
+            w.display(),
+            if p.worktree_exists { "reuse" } else { "create" }
+        ));
+    }
+    o.push_str(&format!("context:   {}\n", p.context.display()));
+    o.push_str(&format!(
+        "status:    {} -> {}\n",
+        p.status_from, p.status_to
+    ));
+    if let Some(c) = &p.command {
+        o.push_str(&format!("command:   {c}\n"));
+    }
+    o
 }
 
 fn pick_repo<'a>(t: &'a Todo, name: Option<&str>) -> Result<Option<&'a Repo>> {

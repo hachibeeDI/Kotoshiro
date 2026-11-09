@@ -56,9 +56,10 @@ todo new "リトライ実装" --repo ~/src/app --body "## Checklist
 ### 2. セッションを起動する
 
 ```sh
-todo start 1              # 起動コマンドを表示
-todo start 1 --exec       # このプロセスを claude に差し替える
+todo start 1              # このプロセスを claude に差し替える
 todo start 1 --repo lib   # repos が複数ある時は選ぶ
+todo start 1 --dry-run    # 何も書かず、何が起きるかだけ見る
+todo start 1 --print      # 記録はするが起動せず、コマンドを表示する (別の場所で打つ用)
 ```
 
 `start` の動作:
@@ -66,11 +67,13 @@ todo start 1 --repo lib   # repos が複数ある時は選ぶ
 1. `<repo>/../<repo名>-wt/todo-<id>` に worktree を作る (ブランチ `todo/<id>`)。既にあれば再利用
 2. `~/todos/<id>/context.md` を生成する。title、checklist、digest、journal 末尾が入る
 3. セッション ID を採番して `sessions.json` に記録し、status を active にする
-4. `claude --session-id <uuid> --name todo-<id>-<repo> --append-system-prompt-file context.md` を `KOTOSHIRO_TODO=<id>` 付きで組み立てる
+4. `claude --session-id <uuid> --name todo-<id>-<repo> --append-system-prompt-file context.md` を `KOTOSHIRO_TODO=<id>` 付きで exec する
 
-repos が空の TODO はカレントディレクトリで起動する。
+repos が空の TODO はカレントディレクトリで起動する。`--json` は exec と両立しないので `--print` 扱い。
 
-herdr や tmux で pane を開き、そこで `todo start <id> --exec` を打つのが想定運用。日が空いた TODO に戻る時も同じ。セッションを resume するのではなく、journal を読んだ新しいセッションを立てる。
+`--print` で表示したコマンドを結局打たなかった場合、`sessions.json` に終わらないセッションが残る (S 列に出続ける)。見るだけなら `--dry-run` を使う。
+
+herdr や tmux で pane を開き、そこで `todo start <id>` を打つのが想定運用。日が空いた TODO に戻る時も同じ。セッションを resume するのではなく、journal を読んだ新しいセッションを立てる。
 
 ### 3. セッション内で起きること
 
@@ -151,7 +154,7 @@ issue へのコメント投稿、PR の merged 確認、worktree の片付けは
 kotoshiro init [--no-link]
 kotoshiro new <title> [--issue org/repo#N] [--repo PATH]... [--blocks ID] [--parent ID] [--body TEXT|-]
 kotoshiro link <id> --issue org/repo#N
-kotoshiro start <id> [--repo NAME] [--exec]
+kotoshiro start <id> [--repo NAME] [--print] [--dry-run]
 kotoshiro note [TEXT|-] [--todo ID]
 kotoshiro check <n> [--undo] [--todo ID]
 kotoshiro status <id> <inbox|planning|active|done> [--force]

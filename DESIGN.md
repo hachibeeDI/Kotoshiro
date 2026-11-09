@@ -49,7 +49,7 @@ interface Runtime {
 }
 ```
 
-- adapter 候補: `herdr` (CLI の `--json` を叩く。socket API は subscribe のみ)、`tmux` (herdr 不在時の最小実装)、`manual` (実行すべきコマンドを表示する。`start --exec` でそのプロセスに差し替わる。CI やテストでも使う)
+- adapter 候補: `herdr` (CLI の `--json` を叩く。socket API は subscribe のみ)、`tmux` (herdr 不在時の最小実装)、`manual` (起動コマンドを組み立てて返す。`start` は既定でそのプロセスに差し替わり、`--print` なら表示する。CI やテストでも使う)
 - adapter の選択は設定ファイルと `KOTOSHIRO_RUNTIME` 環境変数。自動検出はしない (暗黙の依存を作らない)
 - `sessions.json` には `SessionRef` をそのまま保存する。adapter が変わっても過去レコードは読める
 - Claude Code 自体への依存も `Agent` port に切る余地を残す (`claude` コマンド名、`--resume` の形、hook の payload 形式)。初期は claude 固定で良いが、コマンド組み立ては 1 箇所に集める
@@ -133,8 +133,9 @@ kotoshiro init              # ~/todos 作成、$CLAUDE_CONFIG_DIR/settings.json 
 kotoshiro new <title> [--issue org/repo#N] [--repo <path>]... [--blocks <id>] [--parent <id>]
                             # --issue なしの単独 TODO が既定
 kotoshiro link <id> --issue org/repo#N   # issue の後付け
-kotoshiro start <id> [--repo <name>] [--exec]
-                            # worktree 作成 → context.md 生成 → uuid 採番 → sessions.json 記録 → 起動コマンド表示 (--exec で execvp)
+kotoshiro start <id> [--repo <name>] [--print] [--dry-run]
+                            # worktree 作成 → context.md 生成 → uuid 採番 → sessions.json 記録 → claude に execvp
+                            # --print は記録まで行い起動コマンドを表示 (--json も同じ)。--dry-run は何も書かず計画を表示
 kotoshiro note <text>|-     # journal 追記 (セッションが skill 経由で打つ)
 kotoshiro check <n> [--undo]  # checklist の n 番目をトグル。journal に自動記録
 kotoshiro status <id> <st>  # inbox|planning|active|done。done は checklist 全消化 + blocked_by 全 done が条件 (--force で無視)
@@ -182,7 +183,7 @@ kotoshiro done <id>         # 条件: status done 相当 + 全 PR merged
 
 ## 最初の 1 週間
 
-痛み 2・3 (ストアと進捗収集、digest) だけ作る。Runtime は `manual` adapter のみ。herdr で pane を開き、そこで `kotoshiro start <id> --exec` を打つ運用。
+痛み 2・3 (ストアと進捗収集、digest) だけ作る。Runtime は `manual` adapter のみ。herdr で pane を開き、そこで `kotoshiro start <id>` を打つ運用。
 対象: init / new / link / start / note / check / status / hook / digest / list / show。`done` (issue コメント、PR 確認、片付け) と cargo-dist は週 2。
 
 ## 参照

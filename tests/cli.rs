@@ -292,6 +292,35 @@ fn start_with_repo_creates_worktree() {
         .args(["new", "repo 作業", "--repo", repo.to_str().unwrap()])
         .assert()
         .success();
+    let wt = work.join("myrepo-wt").join("todo-1");
+
+    // --dry-run は何も書かない
+    let out = e
+        .cmd()
+        .args(["--json", "start", "1", "--dry-run"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["dry_run"], true);
+    assert_eq!(v["worktree"], wt.to_str().unwrap());
+    assert_eq!(v["worktree_exists"], false);
+    assert_eq!(v["status_to"], "active");
+    assert_eq!(v["session_id"], "<session-id>");
+    assert!(!wt.exists());
+    assert!(!e.todo(1).join("sessions.json").exists());
+    assert!(!e.todo(1).join("context.md").exists());
+    e.cmd()
+        .args(["start", "1", "--dry-run"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("dry-run").and(predicate::str::contains("create")));
+    e.cmd()
+        .args(["start", "1", "--dry-run", "--print"])
+        .assert()
+        .failure();
+
+    // --json は --print 相当 (exec しない)
     let out = e.cmd().args(["--json", "start", "1"]).output().unwrap();
     assert!(
         out.status.success(),
@@ -299,7 +328,7 @@ fn start_with_repo_creates_worktree() {
         String::from_utf8_lossy(&out.stderr)
     );
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    let wt = work.join("myrepo-wt").join("todo-1");
+    assert_eq!(v["dry_run"], false);
     assert_eq!(v["worktree"], wt.to_str().unwrap());
     assert!(wt.join("README").exists());
     let cmd = v["command"].as_str().unwrap();
@@ -328,8 +357,17 @@ fn start_with_repo_creates_worktree() {
     assert!(e.todo(1).join("log").join("other-session.md").exists());
     let _ = sid;
 
-    // 2 回目の start は worktree を再利用
-    e.cmd().args(["start", "1"]).assert().success();
+    // 2 回目の start は worktree を再利用。--print はコマンドを表示するだけ
+    e.cmd()
+        .args(["start", "1", "--print"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("KOTOSHIRO_TODO=1"))
+        .stderr(predicate::str::contains("worktree created").not());
+    // start 2 回 + cwd 照合で登録された other-session
+    let show = e.cmd().args(["--json", "show", "1"]).output().unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&show.stdout).unwrap();
+    assert_eq!(v["sessions"].as_array().unwrap().len(), 3);
 }
 
 #[test]
