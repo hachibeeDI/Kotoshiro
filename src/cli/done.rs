@@ -171,7 +171,7 @@ pub fn run(ctx: &Ctx, a: Args) -> Result<()> {
     // 片付け
     if !a.keep_worktree {
         for r in &t.meta.repos {
-            let dir = r.worktree_dir(a.id);
+            let dir = ctx.config.worktree_dir(r, a.id);
             if dir.is_dir() {
                 match git::worktree_remove(&r.path, &dir, a.force) {
                     Ok(()) => report.worktrees_removed.push(dir),
@@ -186,7 +186,7 @@ pub fn run(ctx: &Ctx, a: Args) -> Result<()> {
             }
         }
     }
-    let rt = runtime::from_env()?;
+    let rt = runtime::select(&ctx.config.runtime(None))?;
     let ws = Workspace {
         id: a.id,
         title: &t.meta.title,
@@ -316,7 +316,7 @@ fn generate_comment(ctx: &Ctx, t: &Todo, prs: &[(String, gh::Pr)]) -> Result<Str
             input.push_str(&format!("### {} [{}]\n{}\n\n", local(e.ts), e.kind, e.text));
         }
     }
-    let s = summarizer::from_env();
+    let s = summarizer::select(&ctx.config);
     s.summarize(PROMPT, &input)
         .with_context(|| format!("summarizer `{}`", s.name()))
         .map(|c| c.trim().to_owned())

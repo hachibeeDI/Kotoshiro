@@ -66,12 +66,7 @@ pub fn by_name(name: &str) -> Option<Box<dyn Runtime>> {
     }
 }
 
-/// `KOTOSHIRO_RUNTIME` (既定 manual)。自動検出はしない。
-pub fn from_env() -> Result<Box<dyn Runtime>> {
-    let name = std::env::var(ENV_RUNTIME).unwrap_or_else(|_| "manual".into());
-    select(&name)
-}
-
+/// 名前は `Config::runtime` で決める (フラグ > env > config > manual)。自動検出はしない。
 pub fn select(name: &str) -> Result<Box<dyn Runtime>> {
     match by_name(name) {
         Some(r) => Ok(r),

@@ -17,7 +17,8 @@ Rust 1.89 以上。
 
 ```sh
 cargo install --git https://github.com/hachibeeDI/Kotoshiro
-kotoshiro init
+kotoshiro init                                        # Claude の設定が ~/.claude なら
+kotoshiro init --claude-config-dir ~/.claude-work     # CLAUDE_CONFIG_DIR を変えているなら
 ```
 
 `init` がやること (冪等。何度打ってもよい):
@@ -25,11 +26,23 @@ kotoshiro init
 | 対象 | 内容 |
 |---|---|
 | `~/todos/` | ストアを作る。`KOTOSHIRO_HOME` で変更可 |
-| `$CLAUDE_CONFIG_DIR/settings.json` | Stop / SessionEnd hook を追記。他の hook は触らない |
-| `$CLAUDE_CONFIG_DIR/skills/kotoshiro/SKILL.md` | セッションに読ませる作法を配置 |
+| `~/todos/config.toml` | 設定の雛形。`--claude-config-dir` を渡すと記録する |
+| `<claude 設定 dir>/settings.json` | Stop / SessionEnd hook を追記。他の hook は触らない |
+| `<claude 設定 dir>/skills/kotoshiro/SKILL.md` | セッションに読ませる作法を配置 |
 | `todo` | `kotoshiro` と同じディレクトリにシンボリックリンク。衝突する時は `--no-link` |
 
-`CLAUDE_CONFIG_DIR` 未設定なら `~/.claude`。
+Claude の設定 dir は `--claude-config-dir` > env `CLAUDE_CONFIG_DIR` > `config.toml` > `~/.claude` の順で決まる。一度 config に記録すれば以後は env の無い window から打っても同じ場所に書く。
+
+### 設定 (`~/todos/config.toml`)
+
+```toml
+runtime = "herdr"                                   # manual | herdr
+worktree = "{repo}/.claude/worktrees/todo-{id}"    # 既定 "{repo}/../{name}-wt/todo-{id}"
+claude_config_dir = "~/.claude-work"
+```
+
+優先順はコマンドのフラグ > 環境変数 > `config.toml` > 既定。未知のキーはエラーになる。
+`claude_config_dir` は `init` の書き先になるだけでなく、`start` が起動する claude と要約器の子プロセスにも `CLAUDE_CONFIG_DIR` として渡る。env の無い pane から `todo start` を打っても hook と skill とログインが揃う。
 
 ## 使い方
 
@@ -78,7 +91,7 @@ repos が空の TODO はカレントディレクトリで起動する。`--json`
 #### herdr で起動する
 
 ```sh
-export KOTOSHIRO_RUNTIME=herdr      # または todo start 1 --runtime herdr
+# config.toml に runtime = "herdr"。または env KOTOSHIRO_RUNTIME=herdr、todo start 1 --runtime herdr
 todo start 1                        # 新しい workspace を作り、その pane で claude を起動
 todo start 1 --repo lib --no-focus  # 同じ workspace に tab を足す。フォーカスは移さない
 ```
@@ -187,7 +200,7 @@ issue を閉じるのは人がやる。issue が無い TODO は `todo issue crea
 ## コマンド一覧
 
 ```
-kotoshiro init [--no-link]
+kotoshiro init [--no-link] [--claude-config-dir PATH]
 kotoshiro new <title> [--issue org/repo#N] [--repo PATH]... [--blocks ID] [--parent ID] [--body TEXT|-]
 kotoshiro link <id> --issue org/repo#N
 kotoshiro start <id> [--repo NAME] [--print] [--dry-run] [--runtime manual|herdr] [--no-focus]
@@ -213,11 +226,11 @@ kotoshiro hook <stop|session-end>        # Claude Code から呼ばれる。stdi
 | `KOTOSHIRO_HOME` | ストアの場所。既定 `~/todos` |
 | `KOTOSHIRO_TODO` | 現在の TODO ID。`start` が起動コマンドに付ける |
 | `KOTOSHIRO_SESSION` | 現在のセッション ID。journal の記録者 |
-| `KOTOSHIRO_RUNTIME` | セッション起動の adapter。`manual` (既定) / `herdr` |
+| `KOTOSHIRO_RUNTIME` | セッション起動の adapter。`manual` (既定) / `herdr`。config の `runtime` より優先 |
 | `KOTOSHIRO_SUMMARIZER` | `claude` (既定) / `fixed` / `fixed:<text>`。テスト用 |
 | `KOTOSHIRO_SUMMARIZER_MODEL` | 要約に使うモデル。既定 `haiku` |
 | `KOTOSHIRO_NESTED` | 要約器の子プロセスに付く。hook はこれを見たら即終了する |
-| `CLAUDE_CONFIG_DIR` | `init` が hook と skill を書く先。既定 `~/.claude` |
+| `CLAUDE_CONFIG_DIR` | Claude Code の設定 dir。config の `claude_config_dir` より優先 |
 
 要約は `claude -p --model haiku` を子プロセスで叩く。ユーザーの Claude ログインを流用するので API キーは要らない。
 
@@ -225,6 +238,7 @@ kotoshiro hook <stop|session-end>        # Claude Code から呼ばれる。stdi
 
 ```
 ~/todos/
+  config.toml             # 設定
   .counter                # 次の ID
   <id>/
     todo.md               # YAML frontmatter + 本文。checklist は本文中の - [ ] 行

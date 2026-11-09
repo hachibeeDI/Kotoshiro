@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
@@ -13,13 +14,16 @@ use crate::proc::Cmd;
 pub struct Claude {
     pub model: String,
     pub timeout: Duration,
+    /// 子プロセスに渡す CLAUDE_CONFIG_DIR。ログイン情報もここにあるので env の無い所から呼ぶ時に効く
+    pub config_dir: Option<PathBuf>,
 }
 
-impl Default for Claude {
-    fn default() -> Self {
+impl Claude {
+    pub fn new(config_dir: Option<PathBuf>) -> Self {
         Self {
             model: std::env::var("KOTOSHIRO_SUMMARIZER_MODEL").unwrap_or_else(|_| "haiku".into()),
             timeout: Duration::from_secs(60),
+            config_dir,
         }
     }
 }
@@ -39,16 +43,21 @@ impl Summarizer for Claude {
     }
 
     fn summarize(&self, prompt: &str, input: &str) -> Result<String> {
-        let out = Cmd::new("claude")
+        let mut cmd = Cmd::new("claude")
             .args(["-p", prompt])
             .args(["--model", &self.model])
             .args(["--output-format", "json", "--no-session-persistence"])
             .args(["--setting-sources", "", "--strict-mcp-config"])
             .env("KOTOSHIRO_NESTED", "1")
             .stdin(input)
-            .timeout(self.timeout)
-            .run()
-            .context("run claude")?;
+            .timeout(self.timeout);
+        if let Some(d) = &self.config_dir {
+            cmd = cmd.env(
+                crate::config::ENV_CLAUDE_CONFIG_DIR,
+                d.to_string_lossy().into_owned(),
+            );
+        }
+        let out = cmd.run().context("run claude")?;
         if out.code != 0 {
             bail!("claude exited {}: {}", out.code, out.stderr.trim());
         }

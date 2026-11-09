@@ -5,6 +5,7 @@ use clap::Args as ClapArgs;
 use serde_json::{json, Value};
 
 use super::Ctx;
+use crate::config;
 
 const SKILL: &str = include_str!("../../assets/SKILL.md");
 const HOOK_TIMEOUT: u64 = 10;
@@ -14,13 +15,39 @@ pub struct Args {
     /// `todo` シンボリックリンクを張らない
     #[arg(long)]
     pub no_link: bool,
+    /// Claude Code の設定ディレクトリ。config.toml に記録する (既定: CLAUDE_CONFIG_DIR > config.toml > ~/.claude)
+    #[arg(long, value_name = "PATH")]
+    pub claude_config_dir: Option<PathBuf>,
 }
 
 pub fn run(ctx: &Ctx, a: Args) -> Result<()> {
     ctx.store.ensure()?;
-    let cfg = claude_config_dir()?;
+    // 明示された時 (フラグ / env / config) だけ config.toml に残す。既定の ~/.claude は書かない
+    let explicit = a
+        .claude_config_dir
+        .as_deref()
+        .map(config::expand_tilde)
+        .or_else(|| ctx.config.claude_config_dir());
+    let cfg = match &explicit {
+        Some(d) => d.clone(),
+        None => dirs::home_dir()
+            .context("home directory not found")?
+            .join(".claude"),
+    };
     let exe = std::env::current_exe()?.canonicalize()?;
     let exe_s = exe.to_string_lossy().into_owned();
+
+    // config.toml
+    let config_path = config::Config::path(&ctx.store);
+    let config_changed = if config_path.exists() {
+        match &explicit {
+            Some(d) => config::set_claude_config_dir(&config_path, d)?,
+            None => false,
+        }
+    } else {
+        std::fs::write(&config_path, config::template(explicit.as_deref()))?;
+        true
+    };
 
     // hooks
     let settings = cfg.join("settings.json");
@@ -55,6 +82,9 @@ pub fn run(ctx: &Ctx, a: Args) -> Result<()> {
     if ctx.json {
         ctx.print_json(&json!({
             "store": ctx.store.root(),
+            "config": config_path,
+            "config_changed": config_changed,
+            "claude_config_dir": cfg,
             "settings": settings,
             "hooks_changed": changed,
             "skill": skill,
@@ -63,6 +93,11 @@ pub fn run(ctx: &Ctx, a: Args) -> Result<()> {
         }))
     } else {
         println!("store:    {}", ctx.store.root().display());
+        println!(
+            "config:   {} ({})",
+            config_path.display(),
+            if config_changed { "updated" } else { "ok" }
+        );
         println!(
             "hooks:    {} ({})",
             settings.display(),
@@ -78,15 +113,6 @@ pub fn run(ctx: &Ctx, a: Args) -> Result<()> {
         }
         Ok(())
     }
-}
-
-pub fn claude_config_dir() -> Result<PathBuf> {
-    if let Some(d) = std::env::var_os("CLAUDE_CONFIG_DIR") {
-        return Ok(PathBuf::from(d));
-    }
-    Ok(dirs::home_dir()
-        .context("home directory not found")?
-        .join(".claude"))
 }
 
 /// `hooks.<event>` に command を 1 つだけ持たせる。古いパスの kotoshiro エントリは置き換える。

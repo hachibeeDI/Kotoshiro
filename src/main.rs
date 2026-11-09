@@ -1,5 +1,6 @@
 mod agent;
 mod cli;
+mod config;
 mod gh;
 mod git;
 mod hook;
@@ -67,8 +68,18 @@ fn main() {
     let cli = Cli::parse();
     let is_hook = matches!(cli.cmd, Cmd::Hook(_));
     let r = Store::from_env().and_then(|store| {
+        let config = match config::Config::load(&store) {
+            Ok(c) => c,
+            // hook は Claude を止めないので壊れた config でも既定で進む
+            Err(e) if is_hook => {
+                eprintln!("kotoshiro: {e:#}; using defaults");
+                config::Config::default()
+            }
+            Err(e) => return Err(e),
+        };
         let ctx = Ctx {
             store,
+            config,
             json: cli.json,
             now: jiff::Timestamp::now(),
         };

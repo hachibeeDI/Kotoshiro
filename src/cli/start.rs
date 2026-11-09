@@ -28,7 +28,7 @@ pub struct Args {
     /// 何も書き込まず、何が起きるかだけ表示する
     #[arg(long)]
     pub dry_run: bool,
-    /// Runtime adapter (既定: KOTOSHIRO_RUNTIME、無ければ manual)
+    /// Runtime adapter: manual | herdr (既定: KOTOSHIRO_RUNTIME > config.toml > manual)
     #[arg(long, value_name = "NAME")]
     pub runtime: Option<String>,
     /// herdr: 新しい workspace / tab にフォーカスを移さない
@@ -55,10 +55,8 @@ struct Plan {
 const DRY_RUN_SESSION: &str = "<session-id>";
 
 pub fn run(ctx: &Ctx, a: Args) -> Result<()> {
-    let rt = match &a.runtime {
-        Some(n) => runtime::select(n)?,
-        None => runtime::from_env()?,
-    };
+    let rt = runtime::select(&ctx.config.runtime(a.runtime.as_deref()))?;
+    let claude_dir = ctx.config.claude_config_dir();
     let launch;
     let title;
     let repo_name;
@@ -69,7 +67,7 @@ pub fn run(ctx: &Ctx, a: Args) -> Result<()> {
 
         let (cwd, worktree) = match &repo {
             Some(r) => {
-                let dir = r.worktree_dir(a.id);
+                let dir = ctx.config.worktree_dir(r, a.id);
                 (dir.clone(), Some(dir))
             }
             None => (std::env::current_dir()?, None),
@@ -82,7 +80,14 @@ pub fn run(ctx: &Ctx, a: Args) -> Result<()> {
         };
         let context_path = ctx.store.context(a.id);
         let name = agent::session_name(a.id, repo.as_ref().map(|r| r.name.as_str()));
-        launch = agent::claude_launch(&cwd, a.id, &session_id, &name, &context_path);
+        launch = agent::claude_launch(
+            &cwd,
+            a.id,
+            &session_id,
+            &name,
+            &context_path,
+            claude_dir.as_deref(),
+        );
         let status_to = match t.meta.status {
             Status::Inbox | Status::Planning => Status::Active,
             s => s,

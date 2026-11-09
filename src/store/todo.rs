@@ -33,14 +33,6 @@ pub struct Repo {
 }
 
 impl Repo {
-    /// `<repo>/../<repo名>-wt/todo-<id>`
-    pub fn worktree_dir(&self, id: u64) -> PathBuf {
-        let parent = self.path.parent().unwrap_or(&self.path);
-        parent
-            .join(format!("{}-wt", self.name))
-            .join(format!("todo-{id}"))
-    }
-
     pub fn branch(&self, id: u64) -> String {
         format!("todo/{id}")
     }
@@ -270,13 +262,12 @@ mod tests {
     }
 
     #[test]
-    fn worktree_dir_rule() {
+    fn branch_rule() {
         let r = Repo {
             name: "app".into(),
             path: PathBuf::from("/src/app"),
             base_branch: "main".into(),
         };
-        assert_eq!(r.worktree_dir(42), PathBuf::from("/src/app-wt/todo-42"));
         assert_eq!(r.branch(42), "todo/42");
     }
 

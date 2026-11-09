@@ -51,7 +51,7 @@ trait Runtime {
 prompt / wait / read / subscribe は driver セッション (Epic 自走) を作る段で足す。それまでは skill から直接 `herdr agent ...` を打てばよい。
 
 - adapter: `manual` (既定。起動コマンドを組み立て、`start` はそのプロセスに差し替わる。`--print` なら表示する。CI やテストでも使う)、`herdr` (CLI を叩く。socket API は subscribe のみ)。`tmux` は herdr 不在時の候補、未実装
-- adapter の選択は `KOTOSHIRO_RUNTIME` 環境変数。自動検出はしない (暗黙の依存を作らない)
+- adapter の選択は `start --runtime` > `KOTOSHIRO_RUNTIME` > `config.toml` の `runtime` > manual。自動検出はしない (暗黙の依存を作らない)
 - `sessions.json` には `SessionRef` をそのまま保存する。adapter が変わっても過去レコードは読める
 - どの adapter でも `start --print` は manual 形式のシェルコマンドを出す。どこでも打てる最終手段として
 
@@ -110,6 +110,7 @@ transcript JSONL の行形式は公式に「内部仕様、バージョンで変
 `$KOTOSHIRO_HOME` (既定 `~/todos`):
 
 ```
+config.toml               # 設定 (下記)。init が雛形を書く
 .counter                  # 連番 ID の次値。ロック下で読み書き
 <id>/
   .lock                   # TODO ディレクトリ単位の排他 (std の File::lock)。2 TODO を触る時は ID 昇順に取る
@@ -139,7 +140,20 @@ ID は連番。ストアはローカル前提。
 
 ### worktree
 
-`<repo>/../<repo名>-wt/todo-<id>`、ブランチ `todo/<id>`、base は `repos[].base_branch`。repos が空の TODO は worktree を作らず cwd で起動する。
+既定は `<repo>/../<repo名>-wt/todo-<id>` (config の `worktree` テンプレートで変更可)、ブランチ `todo/<id>`、base は `repos[].base_branch`。repos が空の TODO は worktree を作らず cwd で起動する。
+
+### 設定 (`$KOTOSHIRO_HOME/config.toml`)
+
+マシン単位の好みだけを持つ。TODO ごとのデータは todo.md、hook の設定は Claude Code 側。ストアの場所だけは bootstrap なので env `KOTOSHIRO_HOME` のまま。
+優先順はコマンドのフラグ > 環境変数 > config > 既定。`init` がコメント付きの雛形を書く。未知のキーはエラー (typo を黙って無視しない)。hook だけは壊れた config でも既定で進む。
+
+| キー | 既定 | 用途 |
+|---|---|---|
+| `runtime` | `manual` | セッション起動の adapter (env `KOTOSHIRO_RUNTIME`) |
+| `worktree` | `{repo}/../{name}-wt/todo-{id}` | worktree の置き場。相対ならリポ基準 |
+| `claude_config_dir` | 無し (claude の既定 `~/.claude`) | `init` の書き先。`start` が起動する claude と要約器の子プロセスにも `CLAUDE_CONFIG_DIR` として渡す。env の無い pane から打っても同じ設定・ログインを使うため (env `CLAUDE_CONFIG_DIR`) |
+
+env で済むものをわざわざ config にした理由: `todo start` を env の無い pane で打つと manual に落ちてその pane で exec される、`init` を env の無い window で打つと `~/.claude` に書かれる、という事故が実際に起きた。設定ファイルなら pane や window に依らない。
 
 ## コマンド
 
@@ -147,7 +161,9 @@ ID は連番。ストアはローカル前提。
 全サブコマンドに `--json`。hook は常に exit 0。
 
 ```
-kotoshiro init              # ~/todos 作成、$CLAUDE_CONFIG_DIR/settings.json に hook 追記、skills/kotoshiro/SKILL.md 配置、todo リンク
+kotoshiro init [--claude-config-dir PATH]
+                            # ~/todos と config.toml 作成、Claude 設定 dir の settings.json に hook 追記、skills/kotoshiro/SKILL.md 配置、todo リンク
+                            # Claude 設定 dir はフラグ > env CLAUDE_CONFIG_DIR > config.toml > ~/.claude。明示されたら config.toml に記録する
 kotoshiro new <title> [--issue org/repo#N] [--repo <path>]... [--blocks <id>] [--parent <id>]
                             # --issue なしの単独 TODO が既定
 kotoshiro link <id> --issue org/repo#N   # issue の後付け

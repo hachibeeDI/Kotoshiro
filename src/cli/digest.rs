@@ -115,7 +115,7 @@ pub fn generate(ctx: &Ctx, id: u64) -> Result<Digest> {
         input.push_str(&logs);
     }
 
-    let s = summarizer::from_env();
+    let s = summarizer::select(&ctx.config);
     let out = s
         .summarize(PROMPT, &input)
         .with_context(|| format!("summarizer `{}`", s.name()))?;

@@ -19,13 +19,21 @@ pub fn claude_launch(
     session_id: &str,
     name: &str,
     context_file: &Path,
+    claude_config_dir: Option<&Path>,
 ) -> Launch {
+    let mut env = vec![
+        (ENV_TODO.into(), todo_id.to_string()),
+        (ENV_SESSION.into(), session_id.to_owned()),
+    ];
+    if let Some(d) = claude_config_dir {
+        env.push((
+            crate::config::ENV_CLAUDE_CONFIG_DIR.into(),
+            d.to_string_lossy().into_owned(),
+        ));
+    }
     Launch {
         cwd: cwd.to_path_buf(),
-        env: vec![
-            (ENV_TODO.into(), todo_id.to_string()),
-            (ENV_SESSION.into(), session_id.to_owned()),
-        ],
+        env,
         argv: vec![
             "claude".into(),
             "--session-id".into(),

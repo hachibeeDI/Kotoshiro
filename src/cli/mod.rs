@@ -20,6 +20,7 @@ use anyhow::{bail, Context, Result};
 use jiff::Timestamp;
 use serde::Serialize;
 
+use crate::config::Config;
 use crate::store::digest::Digest;
 use crate::store::graph;
 use crate::store::paths::{dir_bytes, file_bytes};
@@ -28,6 +29,7 @@ use crate::store::Store;
 
 pub struct Ctx {
     pub store: Store,
+    pub config: Config,
     pub json: bool,
     pub now: Timestamp,
 }

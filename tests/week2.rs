@@ -23,7 +23,9 @@ impl Env {
             .env("KOTOSHIRO_SUMMARIZER", "fixed")
             .env_remove("KOTOSHIRO_TODO")
             .env_remove("KOTOSHIRO_SESSION")
-            .env_remove("KOTOSHIRO_RUNTIME");
+            .env_remove("KOTOSHIRO_RUNTIME")
+            // 開発者のシェルの env が config の検証に混ざらないように
+            .env_remove("CLAUDE_CONFIG_DIR");
         c
     }
 
@@ -386,4 +388,105 @@ fn unknown_runtime_is_an_error() {
         .args(["start", "1", "--dry-run", "--runtime", "manual"])
         .assert()
         .success();
+}
+
+#[test]
+fn config_file_sets_runtime_worktree_and_claude_dir() {
+    let e = Env::new();
+    let (_dir, repo) = git_repo();
+    e.cmd()
+        .args(["new", "設定", "--repo", repo.to_str().unwrap()])
+        .assert()
+        .success();
+    std::fs::write(
+        e.home.path().join("config.toml"),
+        "runtime = \"herdr\"\nworktree = \"{repo}/.wt/todo-{id}\"\nclaude_config_dir = \"/cc/work\"\n",
+    )
+    .unwrap();
+
+    let v = e.json(&["start", "1", "--dry-run"]);
+    assert_eq!(v["runtime"], "herdr");
+    assert_eq!(
+        v["worktree"],
+        repo.join(".wt").join("todo-1").to_str().unwrap()
+    );
+    assert!(v["command"]
+        .as_str()
+        .unwrap()
+        .contains("CLAUDE_CONFIG_DIR=/cc/work"));
+
+    // env はファイルに勝ち、フラグは env に勝つ
+    let out = e
+        .cmd()
+        .env("KOTOSHIRO_RUNTIME", "manual")
+        .env("CLAUDE_CONFIG_DIR", "/cc/env")
+        .args(["--json", "start", "1", "--dry-run"])
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["runtime"], "manual");
+    assert!(v["command"]
+        .as_str()
+        .unwrap()
+        .contains("CLAUDE_CONFIG_DIR=/cc/env"));
+    let out = e
+        .cmd()
+        .env("KOTOSHIRO_RUNTIME", "manual")
+        .args(["--json", "start", "1", "--dry-run", "--runtime", "herdr"])
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["runtime"], "herdr");
+
+    // 壊れた config は止まる (hook 以外)
+    std::fs::write(e.home.path().join("config.toml"), "runtim = \"x\"\n").unwrap();
+    e.cmd()
+        .args(["list"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("config.toml"));
+    e.cmd()
+        .args(["hook", "stop"])
+        .write_stdin("{}")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("using defaults"));
+}
+
+#[test]
+fn init_writes_config_and_records_claude_dir() {
+    let e = Env::new();
+    let cfg = tempfile::tempdir().unwrap();
+    e.cmd()
+        .env_remove("CLAUDE_CONFIG_DIR")
+        .args(["init", "--no-link"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("config:"));
+    let config = e.home.path().join("config.toml");
+    let s = read(&config);
+    assert!(
+        s.contains("# claude_config_dir"),
+        "default dir is not recorded"
+    );
+    assert!(s.contains("# runtime = \"manual\""));
+
+    // --claude-config-dir は記録され、コメントは残る
+    let v = e.json(&[
+        "init",
+        "--no-link",
+        "--claude-config-dir",
+        cfg.path().to_str().unwrap(),
+    ]);
+    assert_eq!(v["config_changed"], true);
+    assert_eq!(v["claude_config_dir"], cfg.path().to_str().unwrap());
+    assert!(cfg.path().join("skills/kotoshiro/SKILL.md").exists());
+    let s = read(&config);
+    assert!(s.contains("# runtime = \"manual\""));
+    assert!(s.contains(&format!("claude_config_dir = \"{}\"", cfg.path().display())));
+
+    // 以後は env なしでも config の dir に書く
+    let v = e.json(&["init", "--no-link"]);
+    assert_eq!(v["config_changed"], false);
+    assert_eq!(v["claude_config_dir"], cfg.path().to_str().unwrap());
 }
