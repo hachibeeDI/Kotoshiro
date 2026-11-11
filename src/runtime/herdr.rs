@@ -17,6 +17,8 @@ pub struct Herdr;
 const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 /// `agent start` は agent の起動完了を待つ (herdr 既定 30 秒)。
 const START_TIMEOUT: Duration = Duration::from_secs(120);
+/// 新しい pane のシェルがプロンプトに着くのを待つ上限 (重い rc 想定)。
+const PROMPT_TIMEOUT: Duration = Duration::from_secs(20);
 const NAME_MAX: usize = 32;
 
 // herdr の出力。フィールドは指定できないので必要な分だけ取り、未知は無視する。
@@ -96,6 +98,50 @@ fn error_message(stderr: &str) -> String {
 
 fn args<const N: usize>(a: [&str; N]) -> Vec<String> {
     a.iter().map(|s| s.to_string()).collect()
+}
+
+#[derive(Deserialize)]
+struct ProcessInfoResult {
+    process_info: ProcessInfo,
+}
+
+#[derive(Deserialize)]
+struct ProcessInfo {
+    #[serde(default)]
+    shell_pid: Option<u64>,
+    #[serde(default)]
+    foreground_processes: Vec<Proc>,
+}
+
+#[derive(Deserialize)]
+struct Proc {
+    #[serde(default)]
+    pid: Option<u64>,
+}
+
+/// シェルだけが前面に居る (rc の子プロセスが終わった) 状態をプロンプトとみなす。
+fn at_prompt(info: &ProcessInfo) -> bool {
+    match (&info.shell_pid, info.foreground_processes.as_slice()) {
+        (Some(shell), [only]) => only.pid == Some(*shell),
+        _ => false,
+    }
+}
+
+/// 期限まで待つ。確認できなくても進む (herdr 側が改めて判定して失敗を返す)。
+fn wait_for_prompt(pane: &str, timeout: Duration) {
+    let deadline = std::time::Instant::now() + timeout;
+    let a = args(["pane", "process-info", "--pane", pane]);
+    loop {
+        match call::<ProcessInfoResult>(&a, CALL_TIMEOUT) {
+            Ok(r) if at_prompt(&r.process_info) => return,
+            Err(_) => return,
+            Ok(_) => {}
+        }
+        if std::time::Instant::now() >= deadline {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
 }
 
 pub fn label(ws: &Workspace) -> String {
@@ -199,6 +245,9 @@ impl Runtime for Herdr {
             }
         };
 
+        // 新しい pane のシェルは rc の実行中。`agent start` はプロンプトに居る pane を要求するので待つ
+        wait_for_prompt(&pane, PROMPT_TIMEOUT);
+
         let session_id = launch
             .env
             .iter()
@@ -211,7 +260,12 @@ impl Runtime for Herdr {
             "agent", "start", &name, "--kind", "claude", "--pane", &pane, "--",
         ]);
         a.extend(launch.argv[1..].iter().cloned());
-        let _: serde_json::Value = call(&a, START_TIMEOUT)?;
+        let _: serde_json::Value = call(&a, START_TIMEOUT).with_context(|| {
+            format!(
+                "pane {pane} is left open; paste the output of `kotoshiro start {} --print` there",
+                ws.id
+            )
+        })?;
         Ok(Spawn::Started(SessionRef {
             runtime: "herdr".into(),
             reference: pane,
@@ -259,6 +313,25 @@ mod tests {
         assert!(n
             .chars()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_'));
+    }
+
+    #[test]
+    fn prompt_detection() {
+        let parse = |s: &str| {
+            serde_json::from_str::<ProcessInfoResult>(s)
+                .unwrap()
+                .process_info
+        };
+        let busy = parse(
+            r#"{"process_info":{"shell_pid":1,"foreground_processes":[{"pid":1,"name":"zsh"},{"pid":2,"name":"brew"}]}}"#,
+        );
+        assert!(!at_prompt(&busy));
+        let child = parse(r#"{"process_info":{"shell_pid":1,"foreground_processes":[{"pid":9}]}}"#);
+        assert!(!at_prompt(&child));
+        let ready = parse(r#"{"process_info":{"shell_pid":1,"foreground_processes":[{"pid":1}]}}"#);
+        assert!(at_prompt(&ready));
+        let none = parse(r#"{"process_info":{}}"#);
+        assert!(!at_prompt(&none));
     }
 
     #[test]

@@ -257,6 +257,14 @@ case "$1 $2" in
     echo '{{"id":"x","result":{{"workspace":{{"workspace_id":"w3"}},"tab":{{"tab_id":"w3:t1"}},"root_pane":{{"pane_id":"w3:p1","extra":1}}}}}}' ;;
   "tab create")
     echo '{{"id":"x","result":{{"tab":{{"tab_id":"w3:t2"}},"root_pane":{{"pane_id":"w3:p2"}}}}}}' ;;
+  "pane process-info")
+    # 1 回目は rc 実行中 (子プロセスあり)、2 回目以降はプロンプト
+    if [ -f "$LOG.prompt" ]; then
+      echo '{{"id":"x","result":{{"process_info":{{"shell_pid":10,"foreground_processes":[{{"pid":10,"name":"zsh"}}],"pane_id":"w3:p1"}}}}}}'
+    else
+      touch "$LOG.prompt"
+      echo '{{"id":"x","result":{{"process_info":{{"shell_pid":10,"foreground_processes":[{{"pid":10,"name":"zsh"}},{{"pid":11,"name":"brew"}}]}}}}}}'
+    fi ;;
   "agent start")
     echo '{{"id":"x","result":{{"type":"agent_started"}}}}' ;;
   "agent get")
@@ -317,6 +325,9 @@ fn herdr_adapter_creates_workspace_then_tab_and_closes() {
     assert!(
         l.contains("--label #1 herdr 対象 --focus --env KOTOSHIRO_TODO=1 --env KOTOSHIRO_SESSION=")
     );
+    // プロンプト待ち: 1 回目は子プロセスありで待ち、2 回目で進む。agent start はその後
+    assert_eq!(l.matches("pane process-info --pane w3:p1").count(), 2);
+    assert!(l.find("pane process-info").unwrap() < l.find("agent start").unwrap());
     assert!(l.contains("agent start todo-1-"));
     assert!(l.contains("--kind claude --pane w3:p1 -- --session-id "));
     assert!(l.contains("--append-system-prompt-file"));
